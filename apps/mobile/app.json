@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "StudyCoach",
+    "slug": "study-coach",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F0F1A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.studycoach.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "집중도 분석과 실시간 코칭을 위해 카메라를 사용합니다.",
+        "NSMicrophoneUsageDescription": "음성 코칭 피드백을 위해 마이크를 사용합니다."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F0F1A"
+      },
+      "package": "com.studycoach.app",
+      "permissions": ["CAMERA", "RECORD_AUDIO"]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "집중도 분석과 실시간 코칭을 위해 카메라를 사용합니다."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "YOUR_PROJECT_ID"
+      }
+    }
+  }
+}
