@@ -21,6 +21,7 @@ interface StudyState {
   status: SessionStatus;
   currentSession: StudySession | null;
   currentSubject: string;
+  subjects: string[];
   elapsedSec: number;
   latestFaceResult: FaceAnalysisResult | null;
   coachPersonality: CoachPersonality;
@@ -49,6 +50,8 @@ interface StudyState {
   ttsInterruptCount: number;          // 사용자 메시지 전송 시 증가 → useTTS가 감지해 즉시 중단
   conversationHistory: ConversationTurn[]; // 세션 내 채팅 대화 히스토리 (user ↔ 코치 직접 대화)
 
+  addSubject: (name: string) => void;
+  removeSubject: (name: string) => void;
   setSubject: (s: string) => void;
   startSession: () => void;
   pauseSession: () => void;
@@ -95,6 +98,7 @@ export const useStudyStore = create<StudyState>()(
       status: 'idle',
       currentSession: null,
       currentSubject: '자유 공부',
+      subjects: ['국어', '영어', '수학', '과학', '코딩'],
       elapsedSec: 0,
       latestFaceResult: null,
       coachPersonality: 'friend',
@@ -122,6 +126,13 @@ export const useStudyStore = create<StudyState>()(
       ttsInterruptCount: 0,
       recentUserChats: [],
       conversationHistory: [],
+
+      addSubject: (name) =>
+        set((s) => ({
+          subjects: s.subjects.includes(name) ? s.subjects : [...s.subjects, name],
+        })),
+      removeSubject: (name) =>
+        set((s) => ({ subjects: s.subjects.filter((sub) => sub !== name) })),
 
       setSubject: (s) => set({ currentSubject: s }),
 
@@ -239,6 +250,7 @@ export const useStudyStore = create<StudyState>()(
       name: 'study-coach-storage',
       partialize: (s) => ({
         sessions: s.sessions,
+        subjects: s.subjects,
         coachPersonality: s.coachPersonality,
         coachEnabled: s.coachEnabled,
         ttsEnabled: s.ttsEnabled,

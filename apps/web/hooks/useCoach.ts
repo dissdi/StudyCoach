@@ -25,20 +25,6 @@ const MAX_CHECK_SEC         = 300;
 
 const SILENCE_KEYWORDS = ['닥쳐', '조용', '그만', '시끄러', '말하지마', '말 하지마', 'quiet', 'shut up', '됐어', '됐고'];
 
-// 빠른 메시지 → 체크 간격 즉시 강제 조정
-const QUICK_INTERVAL_MAP: Array<{ keywords: string[]; sec: number }> = [
-  { keywords: ['집중 잘', '집중잘', '잘 돼', '잘돼', '혼자 할게', '혼자할게'], sec: 240 },
-  { keywords: ['집중이 안', '집중안', '집중 안'], sec: MIN_CHECK_SEC },
-];
-
-function getQuickIntervalOverride(text: string): number | null {
-  const lower = text.toLowerCase();
-  for (const { keywords, sec } of QUICK_INTERVAL_MAP) {
-    if (keywords.some((kw) => lower.includes(kw))) return sec;
-  }
-  return null;
-}
-
 function hasSilenceKeyword(text: string): boolean {
   const lower = text.toLowerCase();
   return SILENCE_KEYWORDS.some((kw) => lower.includes(kw));
@@ -120,13 +106,6 @@ export function useCoach() {
     const messageSnapshot = pendingUserMessage;
     clearPendingMessage();
 
-    // 빠른 메시지 → 체크 간격 즉시 강제 적용 (LLM 응답 기다리지 않음)
-    const intervalOverride = getQuickIntervalOverride(messageSnapshot);
-    if (intervalOverride !== null) {
-      nextCheckSecRef.current = intervalOverride;
-      setAdaptiveCheckSec(intervalOverride);
-    }
-
     if (hasSilenceKeyword(messageSnapshot)) {
       const silenceAdj = {
         type: 'silence' as const,
@@ -162,9 +141,18 @@ export function useCoach() {
 
     (async () => {
       try {
-        const { text, tone } = activeApiKey
+        const response = activeApiKey
           ? await generateDirectCoachResponse(messageSnapshot, context, activeApiKey, getModel(), historySnapshot)
-          : { text: mockDirectReply(messageSnapshot, context), tone: 'calm' as const };
+          : { text: mockDirectReply(messageSnapshot, context), tone: 'calm' as const, nextCheckSec: undefined as number | undefined };
+
+        const { text, tone, nextCheckSec } = response;
+
+        // LLM이 다음 체크 간격을 같이 결정해서 반환했으면 적용 (clamp)
+        if (typeof nextCheckSec === 'number' && Number.isFinite(nextCheckSec)) {
+          const clamped = Math.max(MIN_CHECK_SEC, Math.min(MAX_CHECK_SEC, nextCheckSec));
+          nextCheckSecRef.current = clamped;
+          setAdaptiveCheckSec(clamped);
+        }
 
         addCoachMessage({
           id: `chat-${Date.now()}`,

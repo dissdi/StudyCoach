@@ -441,10 +441,23 @@ function buildDirectReplySystemPrompt(
 
   return `${personas[personality]}
 [현재 세션 상황] 현재 시각: ${formatNow()} | 과목: ${context.subject} | ${timeInfo}
-[규칙] 2~3문장 이내. 대화 흐름을 기억하며 자연스럽게 이어서 대화해. 이모티콘·특수기호 사용 금지. 텍스트만 반환.
+[규칙] message는 2~3문장 이내. 대화 흐름을 기억하며 자연스럽게 이어서 대화. 이모티콘·특수기호 사용 금지.
 [집중 보고 시 특별 규칙] 학생이 "집중 잘 된다", "잘 되는 것 같다", "잘 하고 있다" 등 집중 상태를 긍정적으로 보고하면:
 - 목표 시간이 있을 경우: 반드시 목표 대비 현재 진행 시간과 남은 시간을 구체적으로 언급하며 격려할 것. 예) "너 30분 한다고 했잖아, 지금 25분 했어. 5분만 더 하면 돼!"
-- 목표 시간이 없을 경우: 간단히 격려하고 계속 집중하도록 유도할 것.`;
+- 목표 시간이 없을 경우: 간단히 격려하고 계속 집중하도록 유도할 것.
+
+[nextCheckSec — 다음 주기 체크까지의 간격(초)을 직접 결정하세요]
+사용자의 채팅 내용과 현재 공부 맥락을 보고, 다음 자동 체크를 얼마 뒤에 할지 15~300초 범위에서 정하세요.
+가이드:
+- 학생이 "집중 잘 된다", "혼자 할게", "방해하지 마" 류 — 흐름을 끊지 말 것. nextCheckSec=200~300
+- 학생이 "집중 안 된다", "졸리다", "산만하다", "도와줘" 류 — 자주 챙길 것. nextCheckSec=15~30
+- 질문/잡담/중립적 보고 — 보통 페이스 유지. nextCheckSec=45~90
+- 워밍업 초반(공부시간 10분 미만)에는 25~40 권장
+- 장시간(60분 이상)에는 30~50 권장
+값은 정수. 확신이 없으면 60을 기본값으로.
+
+[응답 형식] 반드시 아래 JSON만 반환하세요 (코드블록·다른 텍스트 없이). message에 이모티콘·특수기호 사용 금지:
+{"message": "코칭 답변 텍스트", "tone": "strict|calm|encouraging", "nextCheckSec": 60}`;
 }
 
 export async function generateDirectCoachResponse(
@@ -458,7 +471,7 @@ export async function generateDirectCoachResponse(
   apiKey: string,
   model: string = OPENAI_MODEL_DEFAULT,
   conversationHistory?: ConversationTurn[],
-): Promise<{ text: string; tone: CoachTone }> {
+): Promise<{ text: string; tone: CoachTone; nextCheckSec?: number }> {
   console.log('[generateDirectCoachResponse] apiKey 앞 4자:', apiKey?.slice(0, 4) || '(없음)', '| model:', model);
   try {
     const systemPrompt = buildDirectReplySystemPrompt(context.personality, context);
@@ -466,7 +479,48 @@ export async function generateDirectCoachResponse(
       ...(conversationHistory ?? []),
       { role: 'user', content: userMessage },
     ];
-    const raw = await callLLMWithHistory(systemPrompt, messages, apiKey, 200, model);
+
+    console.group(`%c[DirectReply→LLM] (${model})`, 'color:#7c3aed;font-weight:bold');
+    console.log('%c■ System Prompt', 'color:#059669;font-weight:bold');
+    console.log(systemPrompt);
+    console.log('%c■ User Message', 'color:#2563eb;font-weight:bold');
+    console.log(userMessage);
+    console.groupEnd();
+
+    const raw = await callLLMWithHistory(systemPrompt, messages, apiKey, 250, model);
+
+    console.group(`%c[LLM→DirectReply] 응답`, 'color:#d97706;font-weight:bold');
+    console.log('%c■ Raw Response', 'color:#dc2626;font-weight:bold');
+    console.log(raw);
+    console.groupEnd();
+
+    // JSON 파싱 시도
+    const jsonStr = raw.match(/\{[\s\S]*\}/)?.[0];
+    if (jsonStr) {
+      try {
+        const parsed = JSON.parse(jsonStr) as {
+          message?: string;
+          tone?: CoachTone;
+          nextCheckSec?: number;
+        };
+        const text = typeof parsed.message === 'string' && parsed.message.trim()
+          ? parsed.message.trim()
+          : mockDirectReply(userMessage, context);
+        const tone: CoachTone = parsed.tone ?? 'encouraging';
+        const nextCheckSec =
+          typeof parsed.nextCheckSec === 'number' && Number.isFinite(parsed.nextCheckSec)
+            ? parsed.nextCheckSec
+            : undefined;
+        console.log(
+          `%c[LLM→DirectReply] 파싱 결과 → text: "${text}" | tone: ${tone} | nextCheckSec: ${nextCheckSec ?? '미설정'}`,
+          'color:#7c3aed',
+        );
+        return { text, tone, nextCheckSec };
+      } catch {
+        // JSON 파싱 실패 → raw 텍스트를 그대로 사용 (하위 호환)
+      }
+    }
+
     const text = raw.trim() || mockDirectReply(userMessage, context);
     return { text, tone: 'encouraging' as CoachTone };
   } catch (err) {
