@@ -18,6 +18,72 @@ type ChatMsg =
   | { kind: 'coach'; id: string; text: string; trigger: string; tone: string; timestamp: number }
   | { kind: 'user'; id: string; text: string; timestamp: number };
 
+// ─── 캐릭터 × 체크 간격별 대사 ──────────────────────────────────────
+// adaptiveCheckSec: 코치가 다음 분석까지 기다리는 초. 짧을수록 예민하게 감시 중.
+import type { CoachPersonality } from '@study-coach/shared';
+
+function getCheckMessage(personality: CoachPersonality, sec: number): string {
+  const msgs: Record<CoachPersonality, [number, string][]> = {
+    // [임계초, 메시지] — 해당 sec 이하면 이 메시지
+    mentor: [
+      [20,  '네이놈! 내가 보고 있다!'],
+      [30,  '이놈, 내가 보고 있느니라'],
+      [60,  '보고 있다'],
+      [120, '흠... 지켜보마'],
+      [180, '계속 보고 있느니라'],
+      [300, '흠, 괜찮군'],
+      [Infinity, '잘 하고 있구나, 이것아'],
+    ],
+    boxing: [
+      [20,  '집중! 눈 떼지마!'],
+      [30,  '내가 다 보고 있어!'],
+      [60,  '보고 있어'],
+      [120, '잘 되고 있어?'],
+      [180, '좋아, 유지해'],
+      [300, '믿고 있어'],
+      [Infinity, '잘 하고 있어'],
+    ],
+    strict_mom: [
+      [20,  '엄마 보고 있어! 딴짓 금지!'],
+      [30,  '집중 안 해? 엄마 보고 있어'],
+      [60,  '집중 제대로 해'],
+      [120, '하고 있긴 하네'],
+      [180, '계속 그렇게 해'],
+      [300, '엄마가 지켜볼게'],
+      [Infinity, '잘 하고 있어'],
+    ],
+    friend: [
+      [20,  '야 나 바로 옆에 있어ㅋ'],
+      [30,  '야 나 보고 있어ㅋㅋ'],
+      [60,  '잘 되고 있어?'],
+      [120, '오 집중하네'],
+      [180, '잘하고 있어'],
+      [300, '완전 잘하고 있어'],
+      [Infinity, '믿어! 잘 하고 있잖아'],
+    ],
+    teacher: [
+      [20,  '집중 상태 면밀히 확인 중'],
+      [30,  '집중 상태 확인 중입니다'],
+      [60,  '지켜보고 있어요'],
+      [120, '집중 잘 되고 있군요'],
+      [180, '좋은 흐름이에요'],
+      [300, '훌륭합니다'],
+      [Infinity, '믿고 있어요'],
+    ],
+    trainer: [
+      [20,  '회원님 집중하십니다~!'],
+      [30,  '회원님 보고 있습니다~!'],
+      [60,  '지켜보고 있습니다 회원님~'],
+      [120, '회원님 좋은데요~?'],
+      [180, '완벽하십니다 회원님~!'],
+      [300, '최고이십니다 회원님~'],
+      [Infinity, '할 수 있습니다 회원님~!'],
+    ],
+  };
+  const steps = msgs[personality] ?? msgs.friend;
+  return (steps.find(([threshold]) => sec <= threshold) ?? steps.at(-1)!)[1];
+}
+
 const QUICK_GOALS = [
   { label: '5분',  sec: 5  * 60 },
   { label: '10분', sec: 10 * 60 },
@@ -51,6 +117,7 @@ export default function SessionPage() {
     isResting, restEndTime, startRest, endRest, adaptiveCheckSec,
     coachTyping, elapsedSec, goalDurationSec, setGoalDuration,
     ttsEnabled, ttsPlayingMessageId, conversationHistory,
+    coachPersonality,
   } = useStudyStore();
 
   const { formatted } = useStudyTimer();
@@ -260,21 +327,51 @@ export default function SessionPage() {
           )}
         </div>
 
-        {/* 웹캠 */}
+        {/* 웹캠 + 상태 패널 (2열) */}
         {!isResting && (
-          <div className="relative mx-4 mb-2 rounded-2xl overflow-hidden bg-card aspect-video max-h-40">
-            {camError ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-[#9898B8]">
-                <span className="text-3xl">📷</span>
-                <span className="text-xs">{camError}</span>
+          <div className="mx-16 mb-2 flex gap-2 items-start">
+
+            {/* 웹캠 — aspect-video로 비율 유지 */}
+            <div className="relative flex-1 rounded-xl overflow-hidden bg-card aspect-video">
+              {camError ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-[#9898B8]">
+                  <span className="text-2xl">📷</span>
+                  <span className="text-[10px]">{camError}</span>
+                </div>
+              ) : (
+                <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+              )}
+              <div className="absolute top-1.5 left-1.5 w-3 h-3 border-t-2 border-l-2 border-primary rounded-tl" />
+              <div className="absolute top-1.5 right-1.5 w-3 h-3 border-t-2 border-r-2 border-primary rounded-tr" />
+              <div className="absolute bottom-1.5 left-1.5 w-3 h-3 border-b-2 border-l-2 border-primary rounded-bl" />
+              <div className="absolute bottom-1.5 right-1.5 w-3 h-3 border-b-2 border-r-2 border-primary rounded-br" />
+            </div>
+
+            {/* 상태 패널 */}
+            <div className="w-[108px] flex-shrink-0 bg-card/80 rounded-xl flex flex-col items-center justify-around p-2.5 gap-1 self-stretch">
+              {/* 집중 상태 */}
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-xl leading-none">{getFaceStateEmoji(faceState)}</span>
+                <div className="flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0" style={{ backgroundColor: stateColor }} />
+                  <span className="text-[11px] text-white font-medium leading-tight">{getFaceStateLabel(faceState)}</span>
+                </div>
               </div>
-            ) : (
-              <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
-            )}
-            <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-primary rounded-tl" />
-            <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-primary rounded-tr" />
-            <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-primary rounded-bl" />
-            <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-primary rounded-br" />
+
+              {/* 구분선 */}
+              <div className="w-full border-t border-elevated/50" />
+
+              {/* 캐릭터 대사 */}
+              <div className="flex flex-col items-center gap-1 px-1">
+                <span className={[
+                  'w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0',
+                  adaptiveCheckSec <= 30 ? 'bg-warn' : adaptiveCheckSec <= 90 ? 'bg-primary/70' : 'bg-[#4A4A6A]',
+                ].join(' ')} />
+                <span className="text-[10px] text-[#7878A0] text-center leading-snug">
+                  {getCheckMessage(coachPersonality, adaptiveCheckSec)}
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
@@ -288,23 +385,6 @@ export default function SessionPage() {
             <button onClick={() => endRest()} className="px-4 py-2 rounded-full bg-secondary/20 border border-secondary/40 text-secondary text-sm font-semibold hover:bg-secondary/30 transition-colors">
               지금 시작
             </button>
-          </div>
-        )}
-
-        {/* 상태 바 */}
-        {!isResting && (
-          <div className="mx-4 mb-2 bg-card/80 rounded-xl px-4 py-2.5 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ backgroundColor: stateColor }} />
-              <span className="text-base">{getFaceStateEmoji(faceState)}</span>
-              <span className="text-white text-sm font-medium">{getFaceStateLabel(faceState)}</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className={['w-1.5 h-1.5 rounded-full animate-pulse', adaptiveCheckSec <= 30 ? 'bg-warn' : adaptiveCheckSec <= 90 ? 'bg-primary/70' : 'bg-focus/60'].join(' ')} />
-              <span className="text-[10px] text-[#5A5A7A] tabular-nums">
-                {adaptiveCheckSec < 60 ? `체크 ${adaptiveCheckSec}s` : `체크 ${Math.round(adaptiveCheckSec / 60)}m`}
-              </span>
-            </div>
           </div>
         )}
 
