@@ -6,8 +6,7 @@ import type { CoachPersonality } from '@study-coach/shared';
 const CHARACTERS: { personality: CoachPersonality; emoji: string; label: string }[] = [
   { personality: 'boxing',     emoji: '🥊', label: '복싱코치' },
   { personality: 'strict_mom', emoji: '😤', label: '엄한엄마' },
-  { personality: 'warm_mom',   emoji: '🤱', label: '따뜻한엄마' },
-  { personality: 'mentor',     emoji: '🧙', label: '스승' },
+  { personality: 'mentor',     emoji: '🧙', label: '스승님' },
   { personality: 'friend',     emoji: '👊', label: '친구' },
   { personality: 'teacher',    emoji: '📖', label: '선생님' },
   { personality: 'trainer',    emoji: '💪', label: '트레이너' },

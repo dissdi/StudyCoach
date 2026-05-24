@@ -45,8 +45,7 @@ export type CoachPersonality =
   | 'trainer'     // 트레이너
   | 'boxing'      // 복싱 코치
   | 'strict_mom'  // 엄한 엄마
-  | 'warm_mom'    // 자상한 엄마
-  | 'mentor';     // 엄한 스승
+  | 'mentor';     // 엄한 스승 (고어체)
 export type LLMProvider = 'openai' | 'anthropic';
 
 export interface CoachMessage {
