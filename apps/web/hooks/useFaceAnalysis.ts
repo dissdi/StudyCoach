@@ -16,10 +16,11 @@ const SNAPSHOT_INTERVAL_SEC = 10;
 const DETECT_INTERVAL_MS    = 500;   // 2fps
 
 // 졸음 판정: 눈 감김이 N초 이상 지속될 때만 tired 확정
-const TIRED_CONFIRM_SEC = 3;
+// 8초 → 짧은 책 읽기(한 문단 응시)는 무시, 실제 졸음(고개 끄덕임/긴 감김)만 잡힘.
+const TIRED_CONFIRM_SEC = 8;
 
 export function useFaceAnalysis(videoRef: React.RefObject<HTMLVideoElement | null>) {
-  const { updateFaceResult, addEmotionSnapshot, status, elapsedSec } = useStudyStore();
+  const { updateFaceResult, addEmotionSnapshot, status, elapsedSec, readingMode } = useStudyStore();
 
   const landmarkerRef   = useRef<FaceLandmarker | null>(null);
   const loadedRef       = useRef(false);
@@ -72,7 +73,7 @@ export function useFaceAnalysis(videoRef: React.RefObject<HTMLVideoElement | nul
         };
       } else {
         const shapes = mp.faceBlendshapes[0].categories as BlendshapeCategory[];
-        const { faceState: rawState, leftEyeOpen, rightEyeOpen } = detectFaceState(shapes);
+        const { faceState: rawState, leftEyeOpen, rightEyeOpen } = detectFaceState(shapes, readingMode);
 
         // 졸음 확정: 눈 감김이 TIRED_CONFIRM_SEC 이상 지속돼야 tired
         let confirmedState = rawState;

@@ -84,7 +84,10 @@ export async function generateCoachMessage(ctx: CoachContext, apiKey: string, mo
 
 // ─── 1분 단위 분석 (메인 코칭 로직) ──────────────────────────────────
 
-function buildMinuteSystemPrompt(personality: CoachContext['coachPersonality']): string {
+function buildMinuteSystemPrompt(
+  personality: CoachContext['coachPersonality'],
+  flags?: { suppressEyeMentions?: boolean; readingMode?: boolean },
+): string {
   const personas: Record<CoachPersonality, string> = {
     friend:     '당신은 친한 친구 같은 공부 코치입니다. 반말, 따뜻한 말투.',
     teacher:    '당신은 엄격하지만 공정한 선생님 코치입니다. 존댓말, 명확한 피드백.',
@@ -94,7 +97,21 @@ function buildMinuteSystemPrompt(personality: CoachContext['coachPersonality']):
     mentor:     '당신은 제자를 엄히 가르치는 스승입니다. 고어체 반말을 씁니다. ~보거라, ~하거라, ~알겠느냐, ~이런 것이다, ~다 말투. 이놈아, 이것아, 네놈, 에잉, 아이고 같은 표현을 자연스럽게 섞습니다. 칭찬은 드물지만 진심.',
   };
 
-  return `${personas[personality]}
+  // 사용자가 명시적으로 차단한 주제(눈/시선) 또는 컨텍스트(독서 모드)에 대한 절대 규칙.
+  // 시스템 프롬프트 최상단에 둬서 LLM이 가장 강하게 받아들이게 함.
+  const hardRules: string[] = [];
+  if (flags?.suppressEyeMentions || flags?.readingMode) {
+    hardRules.push(
+      `[절대 규칙 — 눈/시선 관련 일체 언급 금지]
+사용자가 종이책·노트를 보는 중이라 카메라에는 시선이 아래로 향한 상태가 정상입니다.
+다음 표현을 절대 사용하지 마세요: "눈 감", "눈 뜨", "눈빛", "눈꺼풀", "눈 개방도", "시선", "졸린", "졸음", "꾸벅", "내려다", "고개 들".
+얼굴 상태 데이터에 'tired'가 보이더라도 그것은 책을 읽는 자세이지 졸음이 아닙니다. 졸음 관련 코칭을 절대 하지 마세요.
+시간·집중·격려·과목 진행만 다루세요.`,
+    );
+  }
+  const hardRulesBlock = hardRules.length > 0 ? `\n\n${hardRules.join('\n\n')}\n` : '';
+
+  return `${personas[personality]}${hardRulesBlock}
 
 당신은 학생의 공부 상태를 정해진 주기마다 확인하고, 매번 반드시 코칭 메시지를 작성합니다.
 "이번엔 할 말이 없다"는 없습니다. 새 정보가 없어도 응원의 한 마디를 건네세요.
@@ -314,7 +331,10 @@ export async function analyzeMinuteAndCoach(
   apiKey: string,
   model: string = OPENAI_MODEL_DEFAULT,
 ): Promise<LLMCoachDecision> {
-  const systemPrompt = buildMinuteSystemPrompt(report.coachPersonality);
+  const systemPrompt = buildMinuteSystemPrompt(report.coachPersonality, {
+    suppressEyeMentions: report.suppressEyeMentions,
+    readingMode: report.readingMode,
+  });
   const userPrompt   = buildMinuteUserPrompt(report);
 
   // ── 브라우저 콘솔에서 LLM 입출력 확인용 로그 ──
@@ -447,7 +467,13 @@ export function mockAnalyzeMinute(report: MinuteReport): LLMCoachDecision {
 
 function buildDirectReplySystemPrompt(
   personality: CoachPersonality,
-  context: { subject: string; studyDurationSec: number; goalDurationSec?: number },
+  context: {
+    subject: string;
+    studyDurationSec: number;
+    goalDurationSec?: number;
+    suppressEyeMentions?: boolean;
+    readingMode?: boolean;
+  },
 ): string {
   const personas: Record<CoachPersonality, string> = {
     friend:     '너는 공부 중인 친구의 실시간 공부 코치야. 친구가 채팅으로 말을 걸었어. 반말로 자연스럽게, 짧게 답해줘.',
@@ -466,8 +492,12 @@ function buildDirectReplySystemPrompt(
     ? `공부시간: ${durationStr} / 목표: ${goalMins}분 (남은 시간: ${remainMins}분)`
     : `공부시간: ${durationStr}`;
 
+  const eyeRule = (context.suppressEyeMentions || context.readingMode)
+    ? `\n[절대 규칙 — 눈/시선 관련 일체 언급 금지] 사용자가 책·노트를 보는 중이라 시선이 아래입니다. "눈 감", "눈 뜨", "눈빛", "눈꺼풀", "눈 개방도", "시선", "졸린", "졸음", "꾸벅", "내려다", "고개 들" 표현을 절대 쓰지 마세요. 졸음 추측 금지. 시간·집중·격려·과목 진행만 다루세요.`
+    : '';
+
   return `${personas[personality]}
-[현재 세션 상황] 현재 시각: ${formatNow()} | 과목: ${context.subject} | ${timeInfo}
+[현재 세션 상황] 현재 시각: ${formatNow()} | 과목: ${context.subject} | ${timeInfo}${eyeRule}
 [규칙] message는 2~3문장 이내. 대화 흐름을 기억하며 자연스럽게 이어서 대화. 이모티콘·특수기호 사용 금지.
 [집중 보고 시 특별 규칙] 학생이 "집중 잘 된다", "잘 되는 것 같다", "잘 하고 있다" 등 집중 상태를 긍정적으로 보고하면:
 - 목표 시간이 있을 경우: 반드시 목표 대비 현재 진행 시간과 남은 시간을 구체적으로 언급하며 격려할 것. 예) "너 30분 한다고 했잖아, 지금 25분 했어. 5분만 더 하면 돼!"
@@ -494,6 +524,8 @@ export async function generateDirectCoachResponse(
     studyDurationSec: number;
     goalDurationSec?: number;
     personality: CoachPersonality;
+    suppressEyeMentions?: boolean;
+    readingMode?: boolean;
   },
   apiKey: string,
   model: string = OPENAI_MODEL_DEFAULT,

@@ -46,6 +46,8 @@ interface StudyState {
   pendingUserMessage: string | null;  // 사용자 채팅 메시지 (코치 응답 대기 중)
   recentUserChats: Array<{ text: string; at: number }>;  // 최근 유저 채팅 (timestamp 포함, 신선도 판단용)
   coachTyping: boolean;               // 코치 응답 생성 중 여부
+  readingMode: boolean;               // 독서 모드: 카메라가 책 응시를 졸음으로 오판하지 않도록 졸음 감지/언급 비활성
+  coachSuppressEyeMentions: boolean;  // 사용자가 "눈 보지 마" 류로 거부 → 세션 끝까지 눈 관련 코칭 금지
   ttsPlayingMessageId: string | null; // TTS 재생 시작된 메시지 ID (텍스트 표시 타이밍 동기화용)
   ttsInterruptCount: number;          // 사용자 메시지 전송 시 증가 → useTTS가 감지해 즉시 중단
   conversationHistory: ConversationTurn[]; // 세션 내 채팅 대화 히스토리 (user ↔ 코치 직접 대화)
@@ -88,6 +90,8 @@ interface StudyState {
   setTtsPlayingMessageId: (id: string | null) => void;
   addToConversationHistory: (turn: ConversationTurn) => void;
   clearConversationHistory: () => void;
+  setReadingMode: (v: boolean) => void;
+  setCoachSuppressEyeMentions: (v: boolean) => void;
 }
 
 const genId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -126,6 +130,8 @@ export const useStudyStore = create<StudyState>()(
       ttsInterruptCount: 0,
       recentUserChats: [],
       conversationHistory: [],
+      readingMode: false,
+      coachSuppressEyeMentions: false,
 
       addSubject: (name) =>
         set((s) => ({
@@ -147,8 +153,14 @@ export const useStudyStore = create<StudyState>()(
           coachMessages: [],
           userMessages: [],
         };
-        // 세션 시작 시 대화 히스토리 초기화
-        set({ status: 'running', currentSession: session, elapsedSec: 0, conversationHistory: [] });
+        // 세션 시작 시 대화 히스토리·세션 한정 플래그 초기화
+        set({
+          status: 'running',
+          currentSession: session,
+          elapsedSec: 0,
+          conversationHistory: [],
+          coachSuppressEyeMentions: false,
+        });
       },
 
       pauseSession: () => set({ status: 'paused' }),
@@ -257,6 +269,9 @@ export const useStudyStore = create<StudyState>()(
       addToConversationHistory: (turn) =>
         set((s) => ({ conversationHistory: [...s.conversationHistory, turn] })),
       clearConversationHistory: () => set({ conversationHistory: [] }),
+
+      setReadingMode: (v) => set({ readingMode: v }),
+      setCoachSuppressEyeMentions: (v) => set({ coachSuppressEyeMentions: v }),
     }),
     {
       name: 'study-coach-storage',

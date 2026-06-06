@@ -118,6 +118,7 @@ export default function SessionPage() {
     coachTyping, elapsedSec, goalDurationSec, setGoalDuration,
     ttsEnabled, ttsPlayingMessageId, conversationHistory,
     coachPersonality,
+    readingMode, setReadingMode,
   } = useStudyStore();
 
   const { formatted } = useStudyTimer();
@@ -351,15 +352,31 @@ export default function SessionPage() {
             <div className="w-[108px] flex-shrink-0 bg-card/80 rounded-xl flex flex-col items-center justify-around p-2.5 gap-1 self-stretch">
               {/* 집중 상태 */}
               <div className="flex flex-col items-center gap-1">
-                <span className="text-xl leading-none">{getFaceStateEmoji(faceState)}</span>
+                <span className="text-xl leading-none">{readingMode ? '📖' : getFaceStateEmoji(faceState)}</span>
                 <div className="flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0" style={{ backgroundColor: stateColor }} />
-                  <span className="text-[11px] text-white font-medium leading-tight">{getFaceStateLabel(faceState)}</span>
+                  <span className="w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0" style={{ backgroundColor: readingMode ? '#9898B8' : stateColor }} />
+                  <span className="text-[11px] text-white font-medium leading-tight">
+                    {readingMode ? '독서 중' : getFaceStateLabel(faceState)}
+                  </span>
                 </div>
               </div>
 
               {/* 구분선 */}
               <div className="w-full border-t border-elevated/50" />
+
+              {/* 독서 모드 토글 — 카메라가 책 응시를 졸음으로 오판하지 않게 */}
+              <button
+                onClick={() => setReadingMode(!readingMode)}
+                className={[
+                  'w-full text-[10px] font-medium rounded-md py-1 px-1.5 transition-colors leading-tight',
+                  readingMode
+                    ? 'bg-primary/30 text-primary border border-primary/50'
+                    : 'bg-elevated/60 text-[#7878A0] hover:text-white border border-transparent',
+                ].join(' ')}
+                title="종이책·노트 응시 시 졸음 감지 끄기"
+              >
+                {readingMode ? '독서 모드 ON' : '독서 모드'}
+              </button>
 
               {/* 캐릭터 대사 */}
               <div className="flex flex-col items-center gap-1 px-1">

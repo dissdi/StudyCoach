@@ -34,6 +34,22 @@ function hasSilenceKeyword(text: string): boolean {
   return SILENCE_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
+// 사용자가 눈/시선 관련 언급을 거부할 때 매칭되는 패턴.
+// 책·노트를 보는 자세를 졸음으로 오판해서 반복적으로 짜증 유발하는 경우 차단용.
+// 한 번 매칭되면 세션 내내 눈/시선 멘트 금지 + 졸음 트리거 메시지 억제.
+const EYE_SUPPRESS_PATTERNS = [
+  /눈\s*(을|좀|은)?\s*(보지|보지마|감지|감긴|감김|개방|뜨라|뜨고)/,
+  /눈\s*(감|뜨)/,
+  /눈빛|눈꺼풀|시선/,
+  /책\s*(을|읽|보)/,
+  /책읽|독서|글\s*읽|글자\s*읽/,
+  /내려다|아래\s*보/,
+];
+
+function hasEyeSuppressKeyword(text: string): boolean {
+  return EYE_SUPPRESS_PATTERNS.some((re) => re.test(text));
+}
+
 // ── 메시지 반복 감지 ────────────────────────────────────────────
 /** 텍스트 정규화: 공백·구두점 제거 후 소문자화 */
 function normalize(s: string): string {
@@ -155,6 +171,9 @@ export function useCoach() {
     applyAdjustment,
     removeAdjustment,
     addToConversationHistory,
+    coachSuppressEyeMentions,
+    setCoachSuppressEyeMentions,
+    readingMode,
   } = useStudyStore();
 
   const buffer              = useRef<MinuteDataPoint[]>([]);
@@ -203,6 +222,12 @@ export function useCoach() {
     const messageSnapshot = pendingUserMessage;
     clearPendingMessage();
 
+    // 사용자가 눈/시선 관련 멘트를 거부하면 세션 내내 그 주제 봉인.
+    // 한 번이라도 매칭되면 false로 되돌리지 않음 — 같은 잔소리 반복 방지.
+    if (!coachSuppressEyeMentions && hasEyeSuppressKeyword(messageSnapshot)) {
+      setCoachSuppressEyeMentions(true);
+    }
+
     if (hasSilenceKeyword(messageSnapshot)) {
       const silenceAdj = {
         type: 'silence' as const,
@@ -225,11 +250,16 @@ export function useCoach() {
 
     const activeApiKey = getActiveApiKey();
     console.log('[useCoach] 채팅 응답 시도 | provider:', llmProvider, '| apiKey 있음:', !!activeApiKey, '| model:', getModel());
+    // 사용자가 방금 보낸 메시지에 눈/시선 거부 키워드가 있었다면 즉시 반영
+    // (위의 setCoachSuppressEyeMentions는 비동기라 이 시점에는 아직 false일 수 있음)
+    const eyeSuppressNow = coachSuppressEyeMentions || hasEyeSuppressKeyword(messageSnapshot);
     const context = {
       subject: currentSubject,
       studyDurationSec: elapsedSec,
       goalDurationSec: goalDurationSec > 0 ? goalDurationSec : undefined,
       personality: coachPersonality,
+      suppressEyeMentions: eyeSuppressNow,
+      readingMode,
     };
 
     // 현재 conversationHistory의 마지막 항목은 방금 sendUserMessage에서 추가된 user 메시지
@@ -457,6 +487,8 @@ export function useCoach() {
         : undefined,
       goalDurationMinutes: goalMins,
       goalRemainingMinutes: goalRemainMins,
+      readingMode,
+      suppressEyeMentions: coachSuppressEyeMentions,
     };
 
     const activeApiKey = getActiveApiKey();
@@ -475,8 +507,20 @@ export function useCoach() {
 
         if (!decision.message) return;
 
-        // ── 반복 안전망: LLM이 지침을 무시하고 비슷한 말을 또 했다면 응원으로 교체 ──
+        // ── 눈/시선 멘트 안전망: 사용자가 거부했거나 독서 모드인데 LLM이 어겼다면 응원으로 교체 ──
         let finalText = decision.message;
+        const FORBIDDEN_EYE_REGEX = /눈\s*(감|뜨|빛|꺼풀|개방)|시선|졸린|졸음|꾸벅|내려다|고개\s*들/;
+        if ((coachSuppressEyeMentions || readingMode) && FORBIDDEN_EYE_REGEX.test(finalText)) {
+          const elapsedMin = Math.floor(elapsedSec / 60);
+          finalText = pickFallbackEncouragement(
+            coachPersonality,
+            elapsedMin,
+            recentCoachMessages.slice(-3).map((m) => m.text),
+          );
+          console.warn('[useCoach] 눈/시선 금지 규칙 위반 감지 → 응원으로 대체:', decision.message, '→', finalText);
+        }
+
+        // ── 반복 안전망: LLM이 지침을 무시하고 비슷한 말을 또 했다면 응원으로 교체 ──
         const recentTexts = recentCoachMessages.slice(-3);
         if (isTooSimilarToRecent(finalText, recentTexts)) {
           const elapsedMin = Math.floor(elapsedSec / 60);

@@ -93,6 +93,10 @@ export interface MinuteReport {
   secondsSinceLastUserChat?: number;
   goalDurationMinutes?: number;       // 목표 시간 (분)
   goalRemainingMinutes?: number;      // 목표까지 남은 시간 (분), 목표 없으면 undefined
+  /** 사용자가 종이책·노트를 보는 중 (졸음 감지 비활성) */
+  readingMode?: boolean;
+  /** 사용자가 눈/시선 관련 멘트를 거부함 → 코칭에서 일체 언급 금지 */
+  suppressEyeMentions?: boolean;
 }
 
 export interface LLMCoachDecision {
