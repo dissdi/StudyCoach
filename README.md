@@ -58,3 +58,11 @@ API 키는 브라우저 로컬스토리지에만 저장되며 외부로 전송�
 
 - Node.js 18 이상
 - 웹캠
+
+---
+
+## Credits
+
+- Edge TTS 백엔드: [msedge-tts](https://github.com/Migushthe2nd/MsEdgeTTS) (MIT, © 2023 Migushthe2nd)
+- 얼굴·시선 분석: [MediaPipe Tasks Vision](https://developers.google.com/mediapipe) (Apache 2.0)
+- LLM API: OpenAI, Anthropic
