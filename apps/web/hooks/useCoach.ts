@@ -22,12 +22,109 @@ const SNAPSHOT_INTERVAL_SEC = 10;
 const DEFAULT_CHECK_SEC     = 30;
 const MIN_CHECK_SEC         = 15;
 const MAX_CHECK_SEC         = 300;
+/** 사용자 발언이 LLM 컨텍스트에서 "방금 한 말"로 취급되는 최대 경과 시간 (초) */
+const FRESH_USER_CHAT_SEC   = 120;
+/** 같은 사용자 발언으로 코칭이 몇 번 이상 발생하면 그 발언을 더이상 컨텍스트에 포함하지 않음 */
+const MAX_COACHINGS_PER_USER_CHAT = 2;
 
 const SILENCE_KEYWORDS = ['닥쳐', '조용', '그만', '시끄러', '말하지마', '말 하지마', 'quiet', 'shut up', '됐어', '됐고'];
 
 function hasSilenceKeyword(text: string): boolean {
   const lower = text.toLowerCase();
   return SILENCE_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+// ── 메시지 반복 감지 ────────────────────────────────────────────
+/** 텍스트 정규화: 공백·구두점 제거 후 소문자화 */
+function normalize(s: string): string {
+  return s.replace(/[\s.,!?~·…"'`]/g, '').toLowerCase();
+}
+
+/** 두 문자열의 character bigram Jaccard 유사도 (0~1) */
+function similarity(a: string, b: string): number {
+  const na = normalize(a);
+  const nb = normalize(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  const bigrams = (s: string): Set<string> => {
+    const out = new Set<string>();
+    for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2));
+    return out;
+  };
+  const A = bigrams(na);
+  const B = bigrams(nb);
+  let inter = 0;
+  A.forEach((g) => { if (B.has(g)) inter++; });
+  const union = A.size + B.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+/** 직전 메시지(최대 3개) 중 하나라도 유사도 임계치 이상이면 true */
+function isTooSimilarToRecent(candidate: string, recent: { text: string }[], threshold = 0.55): boolean {
+  return recent.slice(-3).some((m) => similarity(candidate, m.text) >= threshold);
+}
+
+// ── 컨텍스트 없는 응원 풀 (반복 감지 시 fallback) ────────────────
+const FALLBACK_ENCOURAGEMENTS: Record<string, string[]> = {
+  friend: [
+    '잘 하고 있어. 그 페이스 유지하자.',
+    '말 안 해도 보여, 너 진짜 집중하고 있는 거.',
+    '계속 가자. 내가 옆에 있어.',
+    '지금 이 순간이 쌓여서 결과 만들어.',
+  ],
+  teacher: [
+    '잘 하고 있습니다. 계속 그렇게 가세요.',
+    '지금의 집중이 곧 실력이 됩니다.',
+    '꾸준함이 가장 강한 무기입니다.',
+    '한 호흡 가다듬고 다시 한 줄 더 갑시다.',
+  ],
+  trainer: [
+    '회원님 잘 하고 계십니다~! 그대로 가십니다!',
+    '회원님 페이스 좋으십니다~ 유지하십니다!',
+    '회원님 이미 충분히 달리고 계십니다~!',
+    '회원님 한 세트 더 가십니다! 할 수 있습니다!',
+  ],
+  boxing: [
+    '잘 버티고 있어. 그대로 가.',
+    '말 필요 없어. 계속 쳐.',
+    '리듬 좋아. 흐트러지지 마.',
+    '이 라운드도 네 거야. 끝까지 가.',
+  ],
+  strict_mom: [
+    '그래, 잘하고 있어. 계속 해.',
+    '엄마가 보고 있어. 지금 그대로 가.',
+    '말 안 해도 알아. 너 잘 하고 있는 거.',
+    '한 줄만 더, 한 줄만 더 가자.',
+  ],
+  mentor: [
+    '스승은 너를 믿느니라. 가거라.',
+    '잘 하고 있다. 그대로 정진하거라.',
+    '이 순간이 곧 네놈의 실력이 되느니라.',
+    '에잉, 묵묵히 하는 모습이 보기 좋구나.',
+    '말이 필요 없다. 계속 가거라.',
+  ],
+};
+
+function pickFallbackEncouragement(personality: string, elapsedMin: number, lastTexts: string[]): string {
+  const pool = FALLBACK_ENCOURAGEMENTS[personality] ?? FALLBACK_ENCOURAGEMENTS.friend;
+  // 시간 인정 메시지 (mentor 톤 예시) — 10분 단위로
+  const minuteBased: Record<string, (m: number) => string> = {
+    mentor:     (m) => `벌써 ${m}분째 정진하고 있구나. 자랑스럽다.`,
+    friend:     (m) => `벌써 ${m}분 했어. 진짜 잘하고 있어.`,
+    teacher:    (m) => `${m}분 집중했습니다. 훌륭합니다.`,
+    trainer:    (m) => `회원님 ${m}분째이십니다~! 대단하십니다!`,
+    boxing:     (m) => `${m}분 버텼어. 그게 실력이야.`,
+    strict_mom: (m) => `${m}분 했네. 잘했어, 계속 가.`,
+  };
+  // 짝수 호출에선 시간 기반, 홀수 호출에선 일반 응원에서 랜덤 (이미 비슷한 건 제외)
+  const candidates: string[] = [];
+  if (elapsedMin >= 5 && minuteBased[personality]) {
+    candidates.push(minuteBased[personality](elapsedMin));
+  }
+  candidates.push(...pool);
+  // 직전 메시지와 비슷하지 않은 첫 후보 사용
+  const fresh = candidates.find((c) => !lastTexts.some((t) => similarity(c, t) >= 0.55));
+  return fresh ?? pool[Math.floor(Math.random() * pool.length)];
 }
 
 export function useCoach() {
@@ -327,15 +424,34 @@ export function useCoach() {
     const goalRemainSec = goalDurationSec > 0 ? Math.max(0, goalDurationSec - elapsedSec) : undefined;
     const goalRemainMins = goalRemainSec !== undefined ? Math.ceil(goalRemainSec / 60) : undefined;
 
+    // ── 사용자 발언 신선도 필터 ──
+    // FRESH_USER_CHAT_SEC 이내의 발언만 "방금 한 말"로 LLM에 전달.
+    // 그보다 오래된 발언은 더이상 fixation의 원인이 되지 않도록 컨텍스트에서 제외.
+    const recentCoachMessages = currentSession?.coachMessages ?? [];
+    const freshUserChats = recentUserChats
+      .filter((c) => (now - c.at) / 1000 <= FRESH_USER_CHAT_SEC)
+      // 같은 발언으로 이미 MAX_COACHINGS_PER_USER_CHAT 회 이상 코칭이 발생했으면 제외
+      .filter((c) => {
+        const coachingsSince = recentCoachMessages.filter((m) => m.timestamp >= c.at).length;
+        return coachingsSince < MAX_COACHINGS_PER_USER_CHAT;
+      })
+      .map((c) => c.text);
+
+    const lastUserChatSecAgo = recentUserChats.length > 0
+      ? Math.round((now - recentUserChats[recentUserChats.length - 1].at) / 1000)
+      : undefined;
+
     const report: MinuteReport = {
       dataPoints: dataToSend,
       subject: currentSubject,
       totalStudyMinutes: Math.floor(elapsedSec / 60),
       totalStudySeconds: elapsedSec,
       coachPersonality,
-      recentMessages: currentSession?.coachMessages.slice(-2) ?? [],
+      // 직전 코치 메시지 5개를 전달 → LLM이 본인의 반복을 인지할 수 있게
+      recentMessages: recentCoachMessages.slice(-5),
       currentCheckIntervalSec: nextCheckSecRef.current,
-      recentUserChats: recentUserChats.slice(-3),
+      recentUserChats: freshUserChats.slice(-3),
+      secondsSinceLastUserChat: lastUserChatSecAgo,
       userAdjustments: activeAdjustments.length > 0
         ? activeAdjustments.map((a) => a.instruction)
         : undefined,
@@ -359,9 +475,26 @@ export function useCoach() {
 
         if (!decision.message) return;
 
+        // ── 반복 안전망: LLM이 지침을 무시하고 비슷한 말을 또 했다면 응원으로 교체 ──
+        let finalText = decision.message;
+        const recentTexts = recentCoachMessages.slice(-3);
+        if (isTooSimilarToRecent(finalText, recentTexts)) {
+          const elapsedMin = Math.floor(elapsedSec / 60);
+          finalText = pickFallbackEncouragement(
+            coachPersonality,
+            elapsedMin,
+            recentTexts.map((m) => m.text),
+          );
+          // 응원 모드로 강제 전환 → 다음 체크 간격도 늘려서 말 수를 줄임
+          const widerCheck = Math.max(nextCheckSecRef.current, 90);
+          nextCheckSecRef.current = widerCheck;
+          setAdaptiveCheckSec(widerCheck);
+          console.warn('[useCoach] 반복 감지 → 응원 메시지로 대체:', finalText);
+        }
+
         const msg: CoachMessage = {
           id: `coach-${Date.now()}`,
-          text: decision.message,
+          text: finalText,
           tone: decision.tone,
           trigger: decision.isQuestion ? 'question' : 'milestone',
           timestamp: Date.now(),

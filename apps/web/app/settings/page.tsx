@@ -435,6 +435,23 @@ export default function SettingsPage() {
           </button>
         </div>
 
+        {/* 데이터 관리 */}
+        <div className="flex flex-col gap-3">
+          <h2 className="text-base font-semibold text-white">데이터</h2>
+          <a
+            href="/export"
+            className="bg-card rounded-2xl p-4 flex justify-between items-center hover:border-elevated border border-transparent transition-colors"
+          >
+            <div>
+              <p className="text-white font-medium">공부 내역 추출</p>
+              <p className="text-xs text-[#5A5A7A] mt-0.5">
+                AI 코치와의 채팅 기록을 JSON · Markdown · TXT로 저장
+              </p>
+            </div>
+            <span className="text-[#9898B8]">→</span>
+          </a>
+        </div>
+
         {/* 앱 정보 */}
         <div className="bg-card rounded-2xl p-6 text-center flex flex-col gap-2">
           <p className="text-xl font-bold text-white">StudyCoach</p>

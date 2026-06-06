@@ -28,6 +28,14 @@ export interface StudySession {
   avgConcentration: number;   // 각성 점수 (present=100, tired=50, absent=0 평균)
   emotionHistory: EmotionSnapshot[];
   coachMessages: CoachMessage[];
+  userMessages?: UserChatMessage[];  // 세션 중 사용자가 보낸 채팅 (추출용)
+}
+
+// ─── 사용자 채팅 메시지 (세션 저장용) ───────────────────────────────
+export interface UserChatMessage {
+  id: string;
+  text: string;
+  timestamp: number;
 }
 
 export interface EmotionSnapshot {
@@ -81,6 +89,8 @@ export interface MinuteReport {
   userAdjustments?: string[];
   currentCheckIntervalSec?: number;
   recentUserChats?: string[];
+  /** 마지막 사용자 발언으로부터 경과한 초. 신선도 판단용 */
+  secondsSinceLastUserChat?: number;
   goalDurationMinutes?: number;       // 목표 시간 (분)
   goalRemainingMinutes?: number;      // 목표까지 남은 시간 (분), 목표 없으면 undefined
 }

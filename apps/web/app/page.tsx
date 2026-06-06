@@ -28,93 +28,97 @@ interface TimeTableProps {
 }
 
 function TimeTable({ sessions, subjects }: TimeTableProps) {
-  // 오늘 자정 (초 단위)
-  const todayMidnight = new Date();
-  todayMidnight.setHours(0, 0, 0, 0);
-  const midnightSec = todayMidnight.getTime() / 1000;
+  // 오늘 06:00 기준 (현재 시각이 06:00 이전이면 어제 06:00)
+  const base6am = new Date();
+  base6am.setHours(6, 0, 0, 0);
+  if (Date.now() < base6am.getTime()) base6am.setDate(base6am.getDate() - 1);
+  const baseSec = base6am.getTime() / 1000;
 
-  // 1분 단위 색상 배열: 하루 1440분
+  // 1분 단위 색상 배열: index 0 = 06:00, index 1439 = 다음날 05:59
   const minuteColors: (string | null)[] = Array(1440).fill(null);
 
   for (const session of sessions) {
     const subjectIdx = subjects.indexOf(session.subject);
     const color = SUBJECT_COLORS[subjectIdx >= 0 ? subjectIdx % SUBJECT_COLORS.length : 0];
 
-    const startSec = session.startTime / 1000 - midnightSec;
+    const startSec = session.startTime / 1000 - baseSec;
     const endSec   = startSec + session.durationSeconds;
 
     const startMin = Math.floor(startSec / 60);
-    const endMin   = Math.ceil(endSec / 60); // 1초라도 걸치면 그 분을 포함
+    const endMin   = Math.ceil(endSec / 60);
 
     for (let m = Math.max(0, startMin); m < Math.min(1440, endMin); m++) {
       minuteColors[m] = color;
     }
   }
 
-  // 현재 분 인덱스 (현재 시각 블록 하이라이트용)
-  const nowSec        = Date.now() / 1000 - midnightSec;
-  const currentMinIdx = Math.floor(nowSec / 60);
-  const currentBlock  = Math.floor(currentMinIdx / MINS_PER_BLOCK); // 0~143
+  // 현재 분 인덱스 (06:00 기준)
+  const nowSec        = Date.now() / 1000 - baseSec;
+  const currentMinIdx = Math.floor(nowSec / 60); // 0~1439 범위면 오늘 뷰 안
+  const currentBlock  = Math.floor(currentMinIdx / MINS_PER_BLOCK);
 
   return (
     <div className="py-3 px-2 select-none">
-      {Array.from({ length: 24 }, (_, h) => (
-        <div
-          key={h}
-          className="flex items-center"
-          style={{ marginBottom: BLOCK_GAP }}
-        >
-          {/* 시간 라벨 */}
-          <span
-            className="text-[9px] text-[#3A3A5A] text-right flex-shrink-0 leading-none"
-            style={{ width: 18, marginRight: BLOCK_GAP * 2 }}
+      {Array.from({ length: 24 }, (_, i) => {
+        const hour = (6 + i) % 24; // 실제 시각: 6,7,...,23,0,1,...,5
+        return (
+          <div
+            key={i}
+            className="flex items-center"
+            style={{ marginBottom: BLOCK_GAP }}
           >
-            {String(h).padStart(2, '0')}
-          </span>
+            {/* 시간 라벨 */}
+            <span
+              className={`text-[9px] text-right flex-shrink-0 leading-none ${hour === 0 ? 'text-[#5A5A7A]' : 'text-[#3A3A5A]'}`}
+              style={{ width: 18, marginRight: BLOCK_GAP * 2 }}
+            >
+              {String(hour).padStart(2, '0')}
+            </span>
 
-          {/* 6개 블록 */}
-          <div className="flex" style={{ gap: BLOCK_GAP }}>
-            {Array.from({ length: BLOCKS_PER_HOUR }, (_, b) => {
-              const blockIdx   = h * BLOCKS_PER_HOUR + b;
-              const isCurrent  = blockIdx === currentBlock;
-              const baseMinIdx = h * 60 + b * MINS_PER_BLOCK;
+            {/* 6개 블록 */}
+            <div className="flex" style={{ gap: BLOCK_GAP }}>
+              {Array.from({ length: BLOCKS_PER_HOUR }, (_, b) => {
+                const blockIdx   = i * BLOCKS_PER_HOUR + b;
+                const isCurrent  = blockIdx === currentBlock;
+                const baseMinIdx = i * 60 + b * MINS_PER_BLOCK;
 
-              return (
-                <div
-                  key={b}
-                  style={{
-                    width: BLOCK_PX,
-                    height: BLOCK_PX,
-                    borderRadius: 2,
-                    overflow: 'hidden',
-                    display: 'flex',
-                    flexShrink: 0,
-                    outline: isCurrent ? '1px solid #4A4A6A' : 'none',
-                  }}
-                >
-                  {/* 1분 단위 서브셀 10개 (테두리 없이 이어붙임) */}
-                  {Array.from({ length: MINS_PER_BLOCK }, (_, m) => {
-                    const minIdx = baseMinIdx + m;
-                    const color  = minuteColors[minIdx];
-                    const isCurrentMin = minIdx === currentMinIdx;
-                    return (
-                      <div
-                        key={m}
-                        style={{
-                          width: SUBCELL_W,
-                          height: BLOCK_PX,
-                          flexShrink: 0,
-                          backgroundColor: color ?? (isCurrentMin ? CURRENT_COLOR : EMPTY_COLOR),
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-              );
-            })}
+                return (
+                  <div
+                    key={b}
+                    style={{
+                      width: BLOCK_PX,
+                      height: BLOCK_PX,
+                      borderRadius: 2,
+                      overflow: 'hidden',
+                      display: 'flex',
+                      flexShrink: 0,
+                      outline: isCurrent ? '1px solid #4A4A6A' : 'none',
+                    }}
+                  >
+                    {/* 1분 단위 서브셀 10개 */}
+                    {Array.from({ length: MINS_PER_BLOCK }, (_, m) => {
+                      const minIdx = baseMinIdx + m;
+                      const color  = minuteColors[minIdx];
+                      const isCurrentMin = minIdx === currentMinIdx;
+                      return (
+                        <div
+                          key={m}
+                          style={{
+                            width: SUBCELL_W,
+                            height: BLOCK_PX,
+                            flexShrink: 0,
+                            backgroundColor: color ?? (isCurrentMin ? CURRENT_COLOR : EMPTY_COLOR),
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -149,10 +153,17 @@ export default function HomePage() {
     }
   }, [isAdding]);
 
-  // 오늘 세션 필터
-  const todaySessions = sessions.filter(
-    (s) => new Date(s.startTime).toDateString() === new Date().toDateString()
-  );
+  // 06:00 ~ 다음날 06:00 창 기준 세션 필터
+  const base6am = new Date();
+  base6am.setHours(6, 0, 0, 0);
+  if (Date.now() < base6am.getTime()) base6am.setDate(base6am.getDate() - 1);
+  const next6am = new Date(base6am.getTime() + 86400000);
+
+  const todaySessions = sessions.filter((s) => {
+    const startMs = s.startTime;
+    const endMs   = s.startTime + s.durationSeconds * 1000;
+    return startMs < next6am.getTime() && endMs > base6am.getTime();
+  });
 
   // 총 시간
   const todayTotalSec = todaySessions.reduce((a, s) => a + s.durationSeconds, 0);
@@ -204,6 +215,13 @@ export default function HomePage() {
                 className="text-xs text-[#9898B8] px-3 py-1.5 rounded-full bg-card hover:text-white transition-colors"
               >
                 통계
+              </button>
+              <button
+                onClick={() => router.push('/export')}
+                className="text-xs text-[#9898B8] px-3 py-1.5 rounded-full bg-card hover:text-white transition-colors"
+                title="채팅 내역을 JSON/Markdown/TXT로 저장"
+              >
+                내보내기
               </button>
               <button
                 onClick={() => router.push('/settings')}

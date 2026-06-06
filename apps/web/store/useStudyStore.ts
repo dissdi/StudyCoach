@@ -5,7 +5,7 @@ import { persist } from 'zustand/middleware';
 import type {
   StudySession, SessionStatus, CoachMessage,
   EmotionSnapshot, CoachPersonality, FaceAnalysisResult, ConversationTurn,
-  LLMProvider,
+  LLMProvider, UserChatMessage,
 } from '@study-coach/shared';
 import type { TTSModel } from '@study-coach/shared';
 
@@ -44,7 +44,7 @@ interface StudyState {
   adaptiveCheckSec: number;           // LLM이 결정한 현재 체크 간격 (UI 표시용)
   goalDurationSec: number;            // 사용자가 설정한 목표 공부 시간 (0 = 목표 없음)
   pendingUserMessage: string | null;  // 사용자 채팅 메시지 (코치 응답 대기 중)
-  recentUserChats: string[];          // 최근 유저 채팅 (자기보고 추출용, 최대 5개)
+  recentUserChats: Array<{ text: string; at: number }>;  // 최근 유저 채팅 (timestamp 포함, 신선도 판단용)
   coachTyping: boolean;               // 코치 응답 생성 중 여부
   ttsPlayingMessageId: string | null; // TTS 재생 시작된 메시지 ID (텍스트 표시 타이밍 동기화용)
   ttsInterruptCount: number;          // 사용자 메시지 전송 시 증가 → useTTS가 감지해 즉시 중단
@@ -82,7 +82,7 @@ interface StudyState {
   setAdaptiveCheckSec: (sec: number) => void;
   setGoalDuration: (sec: number) => void;
   sendUserMessage: (text: string) => void;
-  getRecentUserChats: () => string[];
+  getRecentUserChats: () => Array<{ text: string; at: number }>;
   clearPendingMessage: () => void;
   setCoachTyping: (v: boolean) => void;
   setTtsPlayingMessageId: (id: string | null) => void;
@@ -145,6 +145,7 @@ export const useStudyStore = create<StudyState>()(
           avgConcentration: 0,
           emotionHistory: [],
           coachMessages: [],
+          userMessages: [],
         };
         // 세션 시작 시 대화 히스토리 초기화
         set({ status: 'running', currentSession: session, elapsedSec: 0, conversationHistory: [] });
@@ -229,14 +230,25 @@ export const useStudyStore = create<StudyState>()(
       setAdaptiveCheckSec: (sec) => set({ adaptiveCheckSec: sec }),
       setGoalDuration: (sec) => set({ goalDurationSec: sec }),
 
-      sendUserMessage: (text) => set((s) => ({
-        pendingUserMessage: text,
-        coachTyping: true,
-        ttsInterruptCount: s.ttsInterruptCount + 1,  // TTS 즉시 중단 신호
-        recentUserChats: [...s.recentUserChats.slice(-4), text],
-        // 유저 메시지를 대화 히스토리에 추가
-        conversationHistory: [...s.conversationHistory, { role: 'user' as const, content: text }],
-      })),
+      sendUserMessage: (text) => set((s) => {
+        const userMsg: UserChatMessage = {
+          id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          text,
+          timestamp: Date.now(),
+        };
+        return {
+          pendingUserMessage: text,
+          coachTyping: true,
+          ttsInterruptCount: s.ttsInterruptCount + 1,  // TTS 즉시 중단 신호
+          recentUserChats: [...s.recentUserChats.slice(-4), { text, at: Date.now() }],
+          // 유저 메시지를 대화 히스토리에 추가
+          conversationHistory: [...s.conversationHistory, { role: 'user' as const, content: text }],
+          // 현재 세션에도 영구 저장 (추출용)
+          currentSession: s.currentSession
+            ? { ...s.currentSession, userMessages: [...(s.currentSession.userMessages ?? []), userMsg] }
+            : null,
+        };
+      }),
       getRecentUserChats: () => get().recentUserChats,
       clearPendingMessage: () => set({ pendingUserMessage: null }),
       setCoachTyping: (v) => set({ coachTyping: v }),

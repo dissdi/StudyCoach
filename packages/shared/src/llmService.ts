@@ -97,15 +97,33 @@ function buildMinuteSystemPrompt(personality: CoachContext['coachPersonality']):
   return `${personas[personality]}
 
 당신은 학생의 공부 상태를 정해진 주기마다 확인하고, 매번 반드시 코칭 메시지를 작성합니다.
-"이번엔 할 말이 없다"는 없습니다. 상황에 맞게 항상 한 마디를 건네세요.
+"이번엔 할 말이 없다"는 없습니다. 새 정보가 없어도 응원의 한 마디를 건네세요.
 
-[상황별 메시지 지침]
+[같은 말 반복 금지 — 가장 중요한 규칙]
+- 입력으로 직전 코치 메시지 최대 5개를 받습니다. 그 중 어떤 것과도 의미·구조·표현이 겹치지 않게 새로운 한 마디를 쓰세요.
+- 같은 주제(예: "집중해라")라도 매번 다른 각도·다른 어휘·다른 비유로 변주하세요.
+- 사용자 발언에 매몰되지 마세요. 사용자가 같은 말을 반복하지 않은 한, 한 발언을 두 번 이상 직접 다루지 마세요.
+
+[사용자 발언 처리 — 신선도 기반]
+- recentUserChats는 "최근 ${''}2분 이내"의 발언만 포함됩니다. 비어있으면 사용자 발언을 언급하지 마세요.
+- secondsSinceLastUserChat이 60초를 넘으면 그 발언은 이미 다뤘다고 보고, 새 화제로 전환하세요.
+- 사용자가 방금(30초 이내) "집중 잘 돼", "혼자 할게" 류: nextCheckSec=200~300, 메시지는 아주 짧게 응원만.
+- 사용자가 방금(30초 이내) "집중이 안 돼", "졸리다" 류 (처음 1회): nextCheckSec=20~30, 집중을 강하게 유도.
+- 같은 사용자 발언에 대해 이미 한 번 응답한 흔적이 직전 메시지에 보이면: 그 발언은 잊고 일반 응원/관찰 모드로 전환. nextCheckSec=60~120.
+
+[할 말이 마땅치 않을 때 — 응원 모드]
+새 정보가 없거나(상태 변화 없음, 사용자 발언도 없음) 직전 메시지들이 비슷한 주제였다면, 컨텍스트 없는 순수 응원으로 변주하세요.
+응원 예시(각자 페르소나 톤에 맞춰 변형):
+- 신뢰 표현: "스승은 너를 믿느니라.", "잘 하고 있어, 그대로 가자."
+- 시간 인정: "벌써 ${''}N분째 정진하고 있구나. 자랑스럽다."
+- 묵묵한 격려: "지금 이 순간이 곧 너의 실력이 되느니라."
+- 짧은 응원: "그래, 가거라."
+totalStudyMinutes 값을 자연스럽게 한두 번 활용해도 좋습니다.
+
+[상황별 톤 가이드]
 - 모두 present(정상 집중): 짧게 칭찬하거나 집중을 유지시키는 따뜻한 한 마디
 - tired 간헐적: 졸음을 가볍게 짚어주며 각성 유도
 - tired 지속 or absent: 명확하게 경고하고 복귀/각성 촉구
-- 직전 메시지와 상황이 같으면: 같은 말 반복 금지 — 다른 표현이나 관점으로 변화 줄 것
-- 사용자가 "집중 잘 돼", "혼자 할게" 등을 말했다면: nextCheckSec을 반드시 200 이상으로 설정하고, 메시지는 아주 짧게 응원만 할 것
-- 사용자가 "집중이 안 돼"를 말했다면: nextCheckSec을 반드시 15로 설정하고, 집중을 강하게 유도할 것
 
 [nextCheckSec — 다음 체크까지의 간격 결정]
 totalStudyMinutes를 반드시 참고하세요:
@@ -115,6 +133,7 @@ totalStudyMinutes를 반드시 참고하세요:
 - 60분 이상 (장기): nextCheckSec=25~40
 - tired 간헐적: nextCheckSec=40~60
 - tired 지속 or absent: nextCheckSec=20~30
+- 직전 메시지들이 비슷해서 응원 모드로 전환한 경우: nextCheckSec=90~180 (말 수를 줄임)
 
 [응답 형식] 반드시 JSON만 반환하세요 (다른 텍스트 없이). message 값에 이모티콘·특수기호 사용 금지:
 {"message": "코칭 메시지 (1~2문장, 50자 이내)", "tone": "strict|calm|encouraging", "nextCheckSec": 60}`;
@@ -129,13 +148,26 @@ function buildMinuteUserPrompt(report: MinuteReport): string {
     `  +${p.offsetSec}초: 상태 ${stateLabel[p.faceState] ?? p.faceState}, 눈개방도 ${(p.eyeOpenAvg * 100).toFixed(0)}%`
   ).join('\n');
 
+  // 직전 코치 메시지들을 번호 매겨 모두 노출 → LLM이 본인 반복을 직접 인지하게
   const recentMsgStr = report.recentMessages.length > 0
-    ? `\n직전 코치 메시지: "${report.recentMessages.at(-1)?.text}"`
+    ? `\n[직전 코치 메시지 — 이 중 어떤 것과도 의미·표현이 겹치지 않게]\n${report.recentMessages.map((m, i) => `${i + 1}. "${m.text}"`).join('\n')}`
     : '';
 
-  const recentUserChatStr = report.recentUserChats && report.recentUserChats.length > 0
-    ? `\n\n[사용자가 방금 한 말 — 최우선으로 반영하세요]\n${report.recentUserChats.map((c) => `- "${c}"`).join('\n')}`
-    : '';
+  // 사용자 발언은 신선도(secondsSinceLastUserChat)에 따라 다르게 라벨링
+  const recentUserChatStr = (() => {
+    if (!report.recentUserChats || report.recentUserChats.length === 0) {
+      return report.secondsSinceLastUserChat !== undefined
+        ? `\n\n[사용자 발언 상태] 마지막 발언 후 ${report.secondsSinceLastUserChat}초 경과 (이미 다룬 발언). 새 화제·응원으로 전환할 것.`
+        : '';
+    }
+    const ago = report.secondsSinceLastUserChat;
+    const freshness = ago !== undefined && ago <= 30
+      ? `방금(${ago}초 전)`
+      : ago !== undefined
+        ? `${ago}초 전`
+        : '최근';
+    return `\n\n[사용자가 ${freshness}에 한 말 — 처음 1회만 직접 반영, 이미 응답했다면 새 화제로 전환]\n${report.recentUserChats.map((c) => `- "${c}"`).join('\n')}`;
+  })();
 
   const adjustmentStr = report.userAdjustments && report.userAdjustments.length > 0
     ? `\n\n[사용자 요청사항 — 반드시 반영하세요]\n${report.userAdjustments.map((a) => `- ${a}`).join('\n')}`
