@@ -127,16 +127,31 @@ export default function SessionPage() {
   useTTS();
 
   // ── 웹캠 시작 ────────────────────────────────────────────────────
+  // 휴식 중에는 {!isResting && <video>} 조건으로 video element가 unmount된다.
+  // "지금 시작" 누르면 video가 새로 mount되는데, [] 의존성 useEffect는 한 번만
+  // 실행되므로 새 element에 srcObject를 다시 붙여야 한다 → streamRef로 보관.
+  const streamRef = useRef<MediaStream | null>(null);
+
   useEffect(() => {
     navigator.mediaDevices
       .getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } })
-      .then((stream) => { if (videoRef.current) videoRef.current.srcObject = stream; })
+      .then((stream) => {
+        streamRef.current = stream;
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      })
       .catch(() => setCamError('카메라 접근 권한이 필요해요.'));
     return () => {
-      if (videoRef.current?.srcObject)
-        (videoRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     };
   }, []);
+
+  // 휴식 종료 → video element 재마운트. 보관해둔 stream을 다시 붙인다.
+  useEffect(() => {
+    if (!isResting && videoRef.current && streamRef.current && !videoRef.current.srcObject) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [isResting]);
 
   // ── 오버레이 높이 측정 (리사이즈 대응) ──────────────────────────
   useEffect(() => {
