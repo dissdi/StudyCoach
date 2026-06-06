@@ -509,7 +509,7 @@ export function useCoach() {
 
         // ── 눈/시선 멘트 안전망: 사용자가 거부했거나 독서 모드인데 LLM이 어겼다면 응원으로 교체 ──
         let finalText = decision.message;
-        const FORBIDDEN_EYE_REGEX = /눈\s*(감|뜨|빛|꺼풀|개방)|시선|졸린|졸음|꾸벅|내려다|고개\s*들/;
+        const FORBIDDEN_EYE_REGEX = /눈\s*(감|뜨|빛|꺼풀|개방)|시선|졸린|졸음|꾸벅|내려다|고개\s*들|자리\s*(를|좀|에)?\s*(비|들락|앉)|자리비움|돌아와|어디\s*갔|뿌리를?\s*내/;
         if ((coachSuppressEyeMentions || readingMode) && FORBIDDEN_EYE_REGEX.test(finalText)) {
           const elapsedMin = Math.floor(elapsedSec / 60);
           finalText = pickFallbackEncouragement(

@@ -7,7 +7,7 @@ import {
   type BlendshapeCategory,
 } from '@study-coach/shared';
 import { useStudyStore } from '@/store/useStudyStore';
-import type { FaceAnalysisResult } from '@study-coach/shared';
+import type { FaceAnalysisResult, FaceState } from '@study-coach/shared';
 
 const WASM_CDN  = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
@@ -64,9 +64,13 @@ export function useFaceAnalysis(videoRef: React.RefObject<HTMLVideoElement | nul
 
       if (!hasface) {
         tiredSinceRef.current = null;
+        // 독서 모드: 책·노트를 내려다보면 카메라가 얼굴을 놓치는 게 정상.
+        // 자리비움(absent) 처리하면 코치가 "자리를 비웠다" 잔소리를 시작하므로,
+        // 얼굴 못 잡혀도 present로 둔다. (faceDetected는 false 유지 — 디버그용)
+        const fallbackState: FaceState = readingMode ? 'present' : 'absent';
         result = {
           faceDetected: false,
-          faceState: 'absent',
+          faceState: fallbackState,
           leftEyeOpen: 0,
           rightEyeOpen: 0,
           timestamp: Date.now(),
